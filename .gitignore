@@ -1,0 +1,24 @@
+# ───── 敏感信息 / 部署密钥（绝不提交）─────
+deploy_keys/
+*.pem
+*.key
+!ui/**/*.png
+.env
+.env.*
+*.local
+
+# ───── 工具内部文件 ─────
+.zcode/
+
+# ───── 系统 / 编辑器 ─────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ───── 日志 / 临时 ─────
+*.log
+tmp/

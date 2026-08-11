@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>九九乘法乐园 - 小朋友的乘法冒险</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Patrick+Hand&family=Baloo+2:wght@600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 背景装饰：漂浮的彩色纸片 -->
+  <div class="bg-decor" aria-hidden="true">
+    <span class="paper-bits c1"></span>
+    <span class="paper-bits c2"></span>
+    <span class="paper-bits c3"></span>
+    <span class="paper-bits c4"></span>
+    <span class="paper-bits c5"></span>
+    <span class="paper-bits c6"></span>
+    <span class="paper-bits c7"></span>
+    <span class="paper-bits c8"></span>
+  </div>
+
+  <!-- 全屏粒子特效画布 -->
+  <canvas id="fx-canvas" aria-hidden="true"></canvas>
+
+  <!-- ============ 主页 ============ -->
+  <section id="screen-home" class="screen active">
+    <header class="topbar">
+      <div class="stat-chip star-chip" title="我的星星">
+        <span class="chip-ico">⭐</span><span id="home-stars">0</span><small>/27</small>
+      </div>
+      <div class="stat-chip coin-chip" title="我的金币">
+        <span class="chip-ico">🪙</span><span id="home-coins">0</span>
+      </div>
+      <button id="btn-settings" class="icon-btn" aria-label="设置">⚙️</button>
+    </header>
+
+    <div class="home-hero">
+      <img src="ui/layer-title-logo.png" alt="九九乘法乐园" class="logo" id="home-logo">
+      <div class="slogan">🎈 快来玩乘法冒险吧！ 🎈</div>
+    </div>
+
+    <nav class="home-buttons">
+      <button id="btn-start" class="big-btn green">
+        <span class="btn-ico">▶</span><span class="btn-text">开始游戏</span>
+        <small class="btn-sub" id="start-sub">继续第 1 关</small>
+      </button>
+      <button id="btn-levels" class="big-btn purple">
+        <span class="btn-ico">⭐</span><span class="btn-text">关卡挑战</span>
+      </button>
+      <button id="btn-learn" class="big-btn blue">
+        <span class="btn-ico">🎁</span><span class="btn-text">学习模式</span>
+      </button>
+    </nav>
+
+    <div class="home-row">
+      <button class="home-card buddy-card" id="btn-buddy">
+        <span class="hc-title">我的小伙伴</span>
+        <img id="home-buddy-img" src="ui/layer-white-rabbit.png" alt="小伙伴">
+        <span class="hc-name" id="home-buddy-name">小白兔</span>
+        <span class="hc-tip">点我换伙伴</span>
+      </button>
+      <button class="home-card report-card" id="btn-report">
+        <span class="hc-title">学习报告</span>
+        <img src="ui/layer-trophy-icon.png" alt="奖杯" class="hc-trophy">
+        <span class="hc-name">看看我有多棒</span>
+      </button>
+    </div>
+
+    <div class="mini-table" id="mini-table" aria-hidden="true">
+      <!-- JS 生成示例小卡片 -->
+    </div>
+  </section>
+
+  <!-- ============ 关卡选择 ============ -->
+  <section id="screen-levels" class="screen">
+    <header class="topbar">
+      <button class="icon-btn back-btn" data-go="home" aria-label="返回">🏠</button>
+      <h1 class="page-title">⭐ 关卡挑战 ⭐</h1>
+      <div class="stat-chip coin-chip"><span class="chip-ico">🪙</span><span id="levels-coins">0</span></div>
+    </header>
+    <div class="level-grid" id="level-grid"><!-- JS 生成 9 关 --></div>
+    <p class="level-tip">💡 通关当前关卡，就能解锁下一关哦！</p>
+  </section>
+
+  <!-- ============ 学习模式 ============ -->
+  <section id="screen-learn" class="screen">
+    <header class="topbar">
+      <button class="icon-btn back-btn" data-go="home" aria-label="返回">🏠</button>
+      <h1 class="page-title">🎁 学习模式</h1>
+      <span class="topbar-spacer"></span>
+    </header>
+
+    <div class="learn-tabs">
+      <button class="learn-tab active" data-tab="mean">🍎 乘法的意义</button>
+      <button class="learn-tab" data-tab="table">📖 口诀表</button>
+      <button class="learn-tab" data-tab="cards">🃏 翻卡片</button>
+    </div>
+
+    <!-- 乘法的意义 -->
+    <div class="learn-pane active" id="pane-mean">
+      <div class="mean-picker">
+        <div class="mean-nums" id="mean-a"></div>
+        <span class="mean-x">×</span>
+        <div class="mean-nums" id="mean-b"></div>
+      </div>
+      <div class="mean-stage">
+        <div class="mean-visual" id="mean-visual"></div>
+        <div class="mean-explain" id="mean-explain"></div>
+      </div>
+    </div>
+
+    <!-- 口诀表 -->
+    <div class="learn-pane" id="pane-table">
+      <div class="mul-table" id="mul-table"></div>
+      <p class="learn-tip">👆 点一点格子，我会读出来哦！</p>
+    </div>
+
+    <!-- 翻卡片 -->
+    <div class="learn-pane" id="pane-cards">
+      <div class="flash-zone">
+        <div class="flash-card" id="flash-card">
+          <div class="flash-face flash-front" id="flash-front">3 × 4 = ?</div>
+          <div class="flash-face flash-back" id="flash-back">12</div>
+        </div>
+        <div class="flash-btns">
+          <button class="big-btn blue small" id="btn-flash-flip">🔄 翻翻看</button>
+          <button class="big-btn green small" id="btn-flash-next">➡ 下一张</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 游戏答题 ============ -->
+  <section id="screen-game" class="screen">
+    <header class="game-top">
+      <button class="icon-btn back-btn" id="btn-quit-game" aria-label="退出">🏠</button>
+      <div class="game-level-name" id="game-level-name">1 的乘法</div>
+      <div class="hearts" id="game-hearts"></div>
+    </header>
+
+    <div class="timer-wrap" id="timer-wrap">
+      <div class="timer-bar"><div class="timer-fill" id="timer-fill"></div></div>
+      <div class="timer-num" id="timer-num">30</div>
+    </div>
+
+    <div class="game-mid">
+      <div class="q-progress"><span id="q-index">1</span>/<span id="q-total">8</span></div>
+      <div class="score-chip">🏆 <span id="game-score">0</span></div>
+      <div class="combo-chip hidden" id="combo-chip">🔥 连击 ×<span id="combo-num">2</span></div>
+    </div>
+
+    <div class="q-card" id="q-card">
+      <button class="speak-btn" id="btn-speak" aria-label="读题">🔊</button>
+      <div class="q-text" id="q-text">3 × 4 = ?</div>
+      <div class="q-hint-line hidden" id="q-hint-line"></div>
+    </div>
+
+    <div class="buddy-cheer" id="buddy-cheer">
+      <img id="game-buddy-img" src="ui/layer-white-rabbit.png" alt="小伙伴">
+      <div class="cheer-bubble hidden" id="cheer-bubble">加油！</div>
+    </div>
+
+    <div class="answers" id="answers"><!-- JS 生成 4 个选项 --></div>
+
+    <footer class="game-tools">
+      <button class="tool-btn" id="tool-hint">
+        <span class="tool-ico">💡</span><span class="tool-name">提示</span>
+        <span class="tool-count" id="count-hint">2</span>
+      </button>
+      <button class="tool-btn" id="tool-skip">
+        <span class="tool-ico">🍃</span><span class="tool-name">跳过</span>
+        <span class="tool-count" id="count-skip">1</span>
+      </button>
+      <button class="tool-btn" id="tool-time">
+        <span class="tool-ico">⏰</span><span class="tool-name">加时</span>
+        <span class="tool-count" id="count-time">1</span>
+      </button>
+    </footer>
+  </section>
+
+  <!-- ============ 结算弹窗（胜利/失败共用） ============ -->
+  <div class="modal-mask hidden" id="modal-result">
+    <div class="result-panel" id="result-panel">
+      <!-- JS 填充 -->
+    </div>
+  </div>
+
+  <!-- ============ 伙伴选择弹窗 ============ -->
+  <div class="modal-mask hidden" id="modal-buddy">
+    <div class="buddy-panel">
+      <h2 class="modal-title">🐾 选一个小伙伴陪你学习</h2>
+      <div class="buddy-grid" id="buddy-grid"></div>
+      <button class="big-btn purple small" id="btn-buddy-close">选好啦</button>
+    </div>
+  </div>
+
+  <!-- ============ 设置弹窗 ============ -->
+  <div class="modal-mask hidden" id="modal-settings">
+    <div class="settings-panel">
+      <h2 class="modal-title">⚙️ 设置</h2>
+      <div class="setting-row">
+        <span>🔊 音效</span>
+        <button class="switch" id="set-sound" role="switch" aria-checked="true"><i></i></button>
+      </div>
+      <div class="setting-row">
+        <span>🗣️ 自动读题</span>
+        <button class="switch" id="set-voice" role="switch" aria-checked="true"><i></i></button>
+      </div>
+      <div class="setting-row">
+        <span>🎵 背景音乐</span>
+        <button class="switch" id="set-music" role="switch" aria-checked="false"><i></i></button>
+      </div>
+      <div class="setting-row danger-row">
+        <span>🗑️ 清空学习记录</span>
+        <button class="mini-danger" id="set-reset">清空</button>
+      </div>
+      <button class="big-btn purple small" id="btn-settings-close">完成</button>
+    </div>
+  </div>
+
+  <!-- ============ 学习报告 ============ -->
+  <section id="screen-report" class="screen">
+    <header class="topbar">
+      <button class="icon-btn back-btn" data-go="home" aria-label="返回">🏠</button>
+      <h1 class="page-title">🏆 学习报告</h1>
+      <span class="topbar-spacer"></span>
+    </header>
+    <div class="report-scroll">
+      <div class="report-overview" id="report-overview"></div>
+      <h3 class="report-h">⭐ 关卡星星</h3>
+      <div class="report-levels" id="report-levels"></div>
+      <h3 class="report-h">🎖️ 我的徽章</h3>
+      <div class="badge-wall" id="badge-wall"></div>
+      <h3 class="report-h">📝 错题本 <small>（再多练一练）</small></h3>
+      <div class="wrong-list" id="wrong-list"></div>
+    </div>
+  </section>
+
+  <!--  Toast 提示 -->
+  <div id="toast" class="toast hidden"></div>
+
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/data.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
