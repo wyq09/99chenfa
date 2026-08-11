@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: 📥 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🔖 注入版本指纹
         # 给 index.html 里 css/js 引用加 ?v=<commit>, 实现长期缓存 + 即时更新
@@ -41,16 +41,35 @@ jobs:
           echo "=== 指纹注入结果预览 ==="
           grep -oE '(href|src)="[^"]*\.(css|js)[^"]*"' index.html
 
-      - name: 🔑 配置 SSH
+      - name: 🔎 校验部署配置
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          echo "SSH_KEY_FILE=~/.ssh/id_ed25519" >> $GITHUB_ENV
+          test -n "$SSH_HOST" || { echo "SSH_HOST Secret 未配置"; exit 1; }
+          test -n "$SSH_USER" || { echo "SSH_USER Secret 未配置"; exit 1; }
+          test -n "$SSH_PRIVATE_KEY" || { echo "SSH_PRIVATE_KEY Secret 未配置"; exit 1; }
+          test -n "$SSH_KNOWN_HOSTS" || { echo "SSH_KNOWN_HOSTS Secret 未配置"; exit 1; }
+
+      - name: 🔑 配置 SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          install -m 600 /dev/null ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          echo "SSH_KEY_FILE=$HOME/.ssh/id_ed25519" >> "$GITHUB_ENV"
 
       - name: 📤 推送静态文件到服务器
         # --delete 保证服务器无残留旧文件; 排除敏感目录
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
         run: |
           rsync -avz --delete \
             --exclude='deploy_keys' \
@@ -58,15 +77,18 @@ jobs:
             --exclude='.github' \
             --exclude='.zcode' \
             --exclude='.DS_Store' \
-            -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
+            -e "ssh -i $SSH_KEY_FILE -o BatchMode=yes -o StrictHostKeyChecking=yes" \
             ./ \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/data/99chengfa/
+            "$SSH_USER@$SSH_HOST:/data/99chengfa/"
 
       - name: 🔄 重载 nginx
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            'sudo nginx -t && sudo nginx -s reload && echo "✅ nginx reload 成功"'
+          ssh -i "$SSH_KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            'sudo /usr/sbin/nginx -t && sudo /usr/bin/systemctl reload nginx && echo "✅ nginx reload 成功"'
 
       - name: ✅ 验证部署
         run: |
@@ -78,3 +100,7 @@ jobs:
             echo "❌ 部署验证失败"
             exit 1
           fi
+
+      - name: 🧹 清理临时 SSH 凭据
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
