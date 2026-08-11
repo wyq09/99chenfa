@@ -28,12 +28,16 @@ jobs:
 
       - name: 🔖 注入版本指纹
         # 给 index.html 里 css/js 引用加 ?v=<commit>, 实现长期缓存 + 即时更新
+        # 用 node 而非 sed: 正则更可靠, 避免 sed 分隔符/转义问题
         run: |
-          SHA7="${GITHUB_SHA::7}"
-          echo "本次部署版本: $SHA7"
-          # 给 href/src 里 .css/.js 引用追加 ?v= 指纹（已有 ? 的跳过避免重复）
-          sed -i -E "s|((?:href|src)=[\"'])([^\"']*\.css)(\?[^\"']*)?([\"'])|\1\2?v=$SHA7\4|g" index.html
-          sed -i -E "s|((?:href|src)=[\"'])([^\"']*\.js)(\?[^\"']*)?([\"'])|\1\2?v=$SHA7\4|g" index.html
+          node -e "
+            const fs = require('fs');
+            let html = fs.readFileSync('index.html', 'utf8');
+            const SHA = '${GITHUB_SHA::7}';
+            html = html.replace(/((?:href|src)=[\"'])([^\"']*?\.(?:css|js))(?:\?[^\"']*)?([\"'])/g, (m, p1, p2, p3) => p1 + p2 + '?v=' + SHA + p3);
+            fs.writeFileSync('index.html', html);
+            console.log('本次部署版本: ' + SHA);
+          "
           echo "=== 指纹注入结果预览 ==="
           grep -oE '(href|src)="[^"]*\.(css|js)[^"]*"' index.html
 
