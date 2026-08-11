@@ -1,0 +1,76 @@
+# 99乘法乐园 · 自动部署
+# 触发: push 到 main 分支
+# 流程: checkout → 注入版本指纹 → rsync 推送 → nginx reload
+# 纯静态无构建, 约 30 秒完成
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 支持手动触发
+
+# 同一时间只跑一个部署, 避免并发覆盖
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 检出代码
+        uses: actions/checkout@v4
+
+      - name: 🔖 注入版本指纹
+        # 给 index.html 里 css/js 引用加 ?v=<commit>, 实现长期缓存 + 即时更新
+        run: |
+          SHA7="${GITHUB_SHA::7}"
+          echo "本次部署版本: $SHA7"
+          # 给 href/src 里 .css/.js 引用追加 ?v= 指纹（已有 ? 的跳过避免重复）
+          sed -i -E "s|((?:href|src)=[\"'])([^\"']*\.css)(\?[^\"']*)?([\"'])|\1\2?v=$SHA7\4|g" index.html
+          sed -i -E "s|((?:href|src)=[\"'])([^\"']*\.js)(\?[^\"']*)?([\"'])|\1\2?v=$SHA7\4|g" index.html
+          echo "=== 指纹注入结果预览 ==="
+          grep -oE '(href|src)="[^"]*\.(css|js)[^"]*"' index.html
+
+      - name: 🔑 配置 SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "SSH_KEY_FILE=~/.ssh/id_ed25519" >> $GITHUB_ENV
+
+      - name: 📤 推送静态文件到服务器
+        # --delete 保证服务器无残留旧文件; 排除敏感目录
+        run: |
+          rsync -avz --delete \
+            --exclude='deploy_keys' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.zcode' \
+            --exclude='.DS_Store' \
+            -e "ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no" \
+            ./ \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/data/99chengfa/
+
+      - name: 🔄 重载 nginx
+        run: |
+          ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            'sudo nginx -t && sudo nginx -s reload && echo "✅ nginx reload 成功"'
+
+      - name: ✅ 验证部署
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://99.youyongai.com")
+          echo "HTTP 状态码: $CODE"
+          if [ "$CODE" = "200" ]; then
+            echo "✅ 部署成功，站点可访问"
+          else
+            echo "❌ 部署验证失败"
+            exit 1
+          fi
