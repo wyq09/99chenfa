@@ -97,9 +97,10 @@
     </header>
 
     <div class="learn-tabs">
-      <button class="learn-tab active" data-tab="mean">🍎 乘法的意义</button>
+      <button class="learn-tab active" data-tab="mean">🍎 意义</button>
       <button class="learn-tab" data-tab="table">📖 口诀表</button>
       <button class="learn-tab" data-tab="cards">🃏 翻卡片</button>
+      <button class="learn-tab" data-tab="jump">🐰 跳跳乐</button>
     </div>
 
     <!-- 乘法的意义 -->
@@ -108,6 +109,7 @@
         <div class="mean-nums" id="mean-a"></div>
         <span class="mean-x">×</span>
         <div class="mean-nums" id="mean-b"></div>
+        <button class="big-btn orange small mean-tour-btn" id="btn-mean-tour">👀 跟我学</button>
       </div>
       <div class="mean-stage">
         <div class="mean-visual" id="mean-visual"></div>
@@ -132,6 +134,22 @@
           <button class="big-btn blue small" id="btn-flash-flip">🔄 翻翻看</button>
           <button class="big-btn green small" id="btn-flash-next">➡ 下一张</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 跳跳乐：数轴跳格子 -->
+    <div class="learn-pane" id="pane-jump">
+      <div class="jump-top">
+        <div class="jump-eq" id="jump-eq">3 × 4 = ?</div>
+        <button class="big-btn orange small" id="btn-jump-new">🎲 换一题</button>
+      </div>
+      <div class="jump-stage">
+        <div class="jump-track" id="jump-track"></div>
+      </div>
+      <div class="jump-sum" id="jump-sum"></div>
+      <div class="flash-btns">
+        <button class="big-btn green small" id="btn-jump-hop">🐰 跳一步</button>
+        <button class="big-btn blue small hidden" id="btn-jump-again">🔄 再跳一次</button>
       </div>
     </div>
   </section>
@@ -238,6 +256,7 @@
       <h3 class="report-h">🎖️ 我的徽章</h3>
       <div class="badge-wall" id="badge-wall"></div>
       <h3 class="report-h">📝 错题本 <small>（再多练一练）</small></h3>
+      <div class="wrong-practice-bar" id="wrong-practice-bar"></div>
       <div class="wrong-list" id="wrong-list"></div>
     </div>
   </section>

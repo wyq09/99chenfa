@@ -9,6 +9,10 @@ deploy_keys/
 
 # ───── 工具内部文件 ─────
 .zcode/
+.agents/
+.claude/
+skills-lock.json
+.listenhub/
 
 # ───── 系统 / 编辑器 ─────
 .DS_Store

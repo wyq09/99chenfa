@@ -159,6 +159,20 @@
     return makeQuestion(randInt(1, 9), randInt(1, 9));
   }
 
+  /* 错题本练习：从错题记录生成题目（去重后打乱；答对的题会从错题本移除） */
+  function genWrongBookQuestions(wrongBook) {
+    if (!wrongBook || !wrongBook.length) return [];
+    var seen = {};
+    var qs = [];
+    wrongBook.forEach(function (w) {
+      var key = w.a * 100 + w.b;
+      if (seen[key]) return;
+      seen[key] = true;
+      qs.push(makeQuestion(w.a, w.b));
+    });
+    return shuffle(qs);
+  }
+
   /* 星级评定：全对=3星；失误≤2次=2星；其余通关=1星 */
   function calcStars(mistakes, total) {
     if (mistakes === 0) return 3;
@@ -171,6 +185,7 @@
     BUDDIES: BUDDIES,
     ACHIEVEMENTS: ACHIEVEMENTS,
     genQuestions: genQuestions,
+    genWrongBookQuestions: genWrongBookQuestions,
     genFlashcard: genFlashcard,
     calcStars: calcStars,
     randInt: randInt,

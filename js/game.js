@@ -65,10 +65,10 @@
 
   function show(name) {
     if (SCREENS.indexOf(name) < 0) return;
-    /* 离开游戏页：停表、取消朗读（防幽灵回调） */
+    /* 离开游戏页：停表、停语音（防幽灵回调） */
     if (current === 'game' && name !== 'game') {
       stopTimer();
-      if ('speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch (e) {} }
+      A.stopVoice();
     }
     current = name;
     SCREENS.forEach(function (s) {
@@ -78,6 +78,7 @@
     if (name === 'home') renderHome();
     if (name === 'levels') renderLevels();
     if (name === 'report') renderReport();
+    if (name === 'learn') A.say('ui_learn', '欢迎来到学习模式，一起来认识乘法吧！');
   }
 
   /* ================= 主页 ================= */
@@ -182,10 +183,16 @@
 
   var G = null; /* 当前对局状态 */
 
+  /* 答错后的节奏（给小朋友足够时间看提示+听讲解语音） */
+  var WRONG_HINT_SHOW_MS = 500;   /* 答案高亮 + 提示条出现 */
+  var WRONG_NEXT_MS = 5200;       /* 答错到下一题：读完 "a 乘 b 等于 c" 讲解 */
+  var WRONG_DEATH_MS = 4400;      /* 最后一颗心碎掉到结算 */
+
   function startGame(levelNo) {
     var cfg = D.LEVELS[levelNo - 1];
     var d = S.get();
     G = {
+      mode: 'level',
       cfg: cfg,
       level: levelNo,
       qs: D.genQuestions(levelNo),
@@ -213,6 +220,52 @@
     show('game');
     renderHearts();
     renderTools();
+    nextQuestion();
+  }
+
+  function startWrongPractice() {
+    var d = S.get();
+    if (!d.wrongBook.length) {
+      toast('🎈 太厉害了，现在没有错题！');
+      return;
+    }
+    var qs = D.genWrongBookQuestions(d.wrongBook);
+    G = {
+      mode: 'practice',
+      cfg: {
+        name: '错题练习',
+        time: 0,
+        hearts: 3,
+        baseScore: 50,
+        tools: { hint: 2, skip: 1, time: 0 }
+      },
+      level: 0,
+      qs: qs,
+      idx: 0,
+      score: 0,
+      combo: 0,
+      mistakes: 0,
+      hearts: 3,
+      tools: { hint: 2, skip: 1, time: 0 },
+      locked: false,
+      timerId: null,
+      endAt: 0,
+      pausedLeft: 0,
+      qStartAt: 0,
+      lastTickSec: -1,
+      over: false
+    };
+    $('game-level-name').textContent = '📝 错题练习 · 共 ' + qs.length + ' 题';
+    var buddy = buddyOf(d.buddy);
+    var gi = $('game-buddy-img');
+    gi.src = buddy.img;
+    guardImg(gi, buddy.emoji);
+    $('q-total').textContent = G.qs.length;
+    $('game-score').textContent = '0';
+    show('game');
+    renderHearts();
+    renderTools();
+    A.say('ui_practice_start', '错题练习开始！把这些题目通通变成小星星吧！');
     nextQuestion();
   }
 
@@ -386,6 +439,13 @@
     /* 闪电手成就：3 秒内答对 */
     if (usedSec <= 3) unlockAch('flash');
 
+    /* 连击鼓励语音（不每题都说话，只在 3 连击和之后每 5 连击） */
+    if (G.combo === 3 || (G.combo > 3 && G.combo % 5 === 0)) {
+      var cheers = [['ui_c1', '答对啦！你真棒！'], ['ui_c2', '太棒了，继续加油！'], ['ui_c3', '好厉害呀！'], ['ui_c4', '你真聪明！']];
+      var pick = cheers[D.randInt(0, cheers.length - 1)];
+      A.say(pick[0], pick[1]);
+    }
+
     /* 错题改正（ comeback 成就） */
     markWrongFixed(q.a, q.b);
 
@@ -426,7 +486,7 @@
       hint.textContent = '💡 ' + q.a + ' × ' + q.b + ' = ' + q.answer +
         '（' + groupText(q.a, q.b) + '）';
       hint.classList.remove('hidden');
-    }, 350);
+    }, WRONG_HINT_SHOW_MS);
 
     /* 心碎动画 */
     renderHearts();
@@ -438,11 +498,11 @@
     recordWrong(q, picked);
     S.update(function (d) { d.stats.answered++; });
 
-    if (S.get().settings.voice) {
-      setTimeout(function () {
-        A.speak('没关系，正确答案是 ' + q.answer);
-      }, 500);
-    }
+    /* 语音讲解：先安抚，再读完整口诀 */
+    A.saySeq([
+      { key: 'ui_wrong', text: '没关系，我们再看看这一题。' },
+      { key: 'k_' + q.a + 'x' + q.b, text: q.a + ' 乘 ' + q.b + ' 等于 ' + q.answer }
+    ]);
 
     var died = G.hearts <= 0;
     setTimeout(function () {
@@ -450,7 +510,7 @@
       if (died) { endGame(false); return; }
       G.idx++;
       nextQuestion();
-    }, died ? 1600 : 1900);
+    }, died ? WRONG_DEATH_MS : WRONG_NEXT_MS);
   }
 
   function onTimeout() {
@@ -541,15 +601,16 @@
     if (!G || G.over) return;
     G.over = true;
     stopTimer();
-    if ('speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch (e) {} }
+    A.stopVoice();
 
     var stars = win ? D.calcStars(G.mistakes, G.qs.length) : 0;
-    var coins = win ? (G.cfg.reward + stars * 10) : Math.floor(G.score / 100);
+    var coins = win ? ((G.cfg.reward || 0) + stars * 10) : Math.floor(G.score / 100);
 
     var firstPass = false;
     S.update(function (d) {
       d.coins += coins;
-      if (win) {
+      /* 错题练习：只发金币，不写关卡进度、不解锁、不给通关成就 */
+      if (win && G.mode !== 'practice') {
         var key = String(G.level);
         var st = d.levels[key] || { stars: 0, best: 0, plays: 0, wins: 0 };
         firstPass = st.stars === 0;
@@ -560,9 +621,14 @@
         d.levels[key] = st;
         if (G.level < 9 && d.unlockedLevel < G.level + 1) {
           d.unlockedLevel = G.level + 1;
+          endGame._justUnlocked = true;
+        } else {
+          endGame._justUnlocked = false;
         }
+      } else {
+        endGame._justUnlocked = false;
       }
-      checkAchievements(d, win, stars);
+      if (G.mode !== 'practice') checkAchievements(d, win, stars);
     });
 
     showResult(win, stars, coins, firstPass);
@@ -574,8 +640,33 @@
     var panel = $('result-panel');
     panel.className = 'result-panel' + (win ? '' : ' fail');
     var html = '';
+    var isPractice = G.mode === 'practice';
+    var remain = isPractice ? S.get().wrongBook.length : 0;
 
-    if (win) {
+    if (isPractice && win) {
+      html += '<div class="result-emoji">' + (remain === 0 ? '🎉' : '💪') + '</div>';
+      html += '<div class="result-title win">' + (remain === 0 ? '全部练会啦！' : '练习完成！') + '</div>';
+      html += '<div class="result-sub">' +
+        (remain === 0 ? '错题本清空，你真棒！' : '还有 ' + remain + ' 道错题，继续加油哦') +
+        '</div>';
+      html += '<div class="result-score">得分 <span class="num">' + G.score + '</span></div>';
+      html += '<div class="result-coins">🪙 +' + coins + ' 金币</div>';
+      html += '<div class="result-btns">';
+      if (remain > 0) {
+        html += '<button class="big-btn green small" id="r-replay">🔄 再练一次</button>';
+      }
+      html += '<button class="big-btn purple small" id="r-back">📋 返回报告</button>';
+      html += '</div>';
+    } else if (isPractice && !win) {
+      html += '<div class="result-emoji">💪</div>';
+      html += '<div class="result-title fail">继续加油！</div>';
+      html += '<div class="result-sub">错题练习不限时，慢慢来没关系</div>';
+      html += '<div class="result-score">本次得分 <span class="num">' + G.score + '</span></div>';
+      html += '<div class="result-btns">';
+      html += '<button class="big-btn green small" id="r-replay">🔄 重新练习</button>';
+      html += '<button class="big-btn purple small" id="r-back">📋 返回报告</button>';
+      html += '</div>';
+    } else if (win) {
       var lastLevel = G.level >= 9;
       html += '<div class="result-emoji">🎉</div>';
       html += '<div class="result-title win">太棒了！</div>';
@@ -617,14 +708,21 @@
       setTimeout(function () { A.play('coin'); }, 800);
       window.FX.fireworks();
       window.FX.confetti();
-      if (S.get().settings.voice) {
-        setTimeout(function () { A.speak('太棒了！恭喜通关！获得了 ' + stars + ' 颗星星！'); }, 400);
+      if (isPractice) {
+        if (remain === 0) {
+          A.say('ui_practice_clear', '哇！错题本清空啦，你真棒！');
+        } else {
+          A.say('ui_c1', '答对啦！你真棒！');
+        }
+      } else {
+        A.say('ui_win', '太棒了！恭喜通关！');
+        if (endGame._justUnlocked) {
+          setTimeout(function () { A.say('ui_unlock', '新关卡解锁啦，你太厉害了！'); }, 2000);
+        }
       }
     } else {
       A.play('fail');
-      if (S.get().settings.voice) {
-        setTimeout(function () { A.speak('加油！再试一次，你一定可以的！'); }, 300);
-      }
+      A.say('ui_fail', '加油！再试一次，你一定可以的！');
     }
 
     var nextBtn = $('r-next');
@@ -636,12 +734,13 @@
     $('r-replay').addEventListener('click', function () {
       A.play('click');
       closeResult();
-      startGame(G.level);
+      if (G.mode === 'practice') startWrongPractice();
+      else startGame(G.level);
     });
     $('r-back').addEventListener('click', function () {
       A.play('click');
       closeResult();
-      show('levels');
+      show(G.mode === 'practice' ? 'report' : 'levels');
     });
     var learnBtn = $('r-learn');
     if (learnBtn) learnBtn.addEventListener('click', function () {
@@ -729,12 +828,13 @@
   function renderMeanPicker() {
     var boxA = $('mean-a'), boxB = $('mean-b');
     boxA.innerHTML = ''; boxB.innerHTML = '';
-    for (var n = 1; n <= 6; n++) {
+    for (var n = 1; n <= 9; n++) {
       (function (num) {
         var b1 = document.createElement('button');
         b1.className = 'mean-num' + (num === meanA ? ' sel' : '');
         b1.textContent = num;
         b1.addEventListener('click', function () {
+          cancelMeanTour();
           meanA = num; A.play('click'); renderMeanPicker(); renderMeanVisual(true);
         });
         boxA.appendChild(b1);
@@ -743,6 +843,7 @@
         b2.className = 'mean-num' + (num === meanB ? ' sel' : '');
         b2.textContent = num;
         b2.addEventListener('click', function () {
+          cancelMeanTour();
           meanB = num; A.play('click'); renderMeanPicker(); renderMeanVisual(true);
         });
         boxB.appendChild(b2);
@@ -774,9 +875,138 @@
     exp.innerHTML =
       '<div>' + meanA + ' 个 ' + meanB + ' 相加：' + parts.join(' + ') + ' = <b class="ans">' + (meanA * meanB) + '</b></div>' +
       '<div class="eq">所以 ' + meanA + ' × ' + meanB + ' = <b class="ans">' + (meanA * meanB) + '</b></div>';
-    if (speakIt && S.get().settings.voice) {
-      A.speak(meanA + ' 乘 ' + meanB + ' 等于 ' + (meanA * meanB) + '，就是 ' + meanA + ' 个 ' + meanB + ' 相加');
+    if (speakIt) {
+      A.say('mk_' + meanA + 'x' + meanB,
+        '就是 ' + meanA + ' 个 ' + meanB + ' 相加，' + meanA + ' 乘 ' + meanB + ' 等于 ' + (meanA * meanB) + '。');
     }
+  }
+
+  /* ---------- 跟我学：分步引导（一年级向，语音驱动节奏） ---------- */
+  var tourToken = 0;
+  function cancelMeanTour() { tourToken++; }
+
+  function meanTour() {
+    var tok = ++tourToken;
+    A.stopVoice();
+    var vis = $('mean-visual');
+    var exp = $('mean-explain');
+    vis.innerHTML = '';
+    exp.innerHTML = '<div class="eq">👀 看一看：' + meanA + ' 个 ' + meanB + ' 是多少？</div>';
+    var emoji = MEAN_EMOJIS[(meanA + meanB) % MEAN_EMOJIS.length];
+    var acc = 0;
+    var chain = [];
+    var step = 0;
+
+    function addGroup() {
+      var grp = document.createElement('div');
+      grp.className = 'mean-group';
+      for (var i = 0; i < meanB; i++) {
+        var it = document.createElement('span');
+        it.className = 'mean-item';
+        it.textContent = emoji;
+        it.style.animationDelay = (i * 0.06) + 's';
+        grp.appendChild(it);
+      }
+      vis.appendChild(grp);
+    }
+
+    function nextStep() {
+      if (tok !== tourToken) return;
+      if (step >= meanA) { finish(); return; }
+      step++;
+      addGroup();
+      acc += meanB;
+      chain.push(meanB);
+      exp.innerHTML = '<div>' + step + ' 个 ' + meanB + ' 相加：' + chain.join(' + ') +
+        ' = <b class="ans">' + acc + '</b></div>';
+      A.play('pop');
+      A.say('mg_' + step + 'x' + meanB, step + ' 个 ' + meanB + '，是 ' + acc + '。')
+        .then(function () {
+          setTimeout(nextStep, 600);
+        });
+    }
+
+    function finish() {
+      if (tok !== tourToken) return;
+      var total = meanA * meanB;
+      exp.innerHTML =
+        '<div>' + meanA + ' 个 ' + meanB + ' 相加：' + chain.join(' + ') + ' = <b class="ans">' + total + '</b></div>' +
+        '<div class="eq">所以 ' + meanA + ' × ' + meanB + ' = <b class="ans">' + total + '</b></div>';
+      window.FX.confetti();
+      A.play('star');
+      A.say('mk_' + meanA + 'x' + meanB,
+        '就是 ' + meanA + ' 个 ' + meanB + ' 相加，' + meanA + ' 乘 ' + meanB + ' 等于 ' + total + '。');
+    }
+
+    nextStep();
+  }
+
+  /* ================= 跳跳乐：数轴跳格子（乘法 = 重复跳几次） ================= */
+
+  var jump = { a: 3, b: 4, hops: 0, pos: 0, busy: false };
+
+  function jumpNew() {
+    jump.a = D.randInt(2, 9);
+    jump.b = D.randInt(2, 9);
+    jumpReset();
+  }
+
+  function jumpReset() {
+    jump.hops = 0;
+    jump.pos = 0;
+    jump.busy = false;
+    $('jump-eq').innerHTML = jump.a + ' × ' + jump.b + ' = <span class="blank">?</span>';
+    $('btn-jump-hop').classList.remove('hidden');
+    $('btn-jump-again').classList.add('hidden');
+    $('jump-sum').innerHTML = '🐰 点「跳一步」，小伙伴每次跳 ' + jump.b + ' 格';
+    renderJumpTrack();
+  }
+
+  function renderJumpTrack() {
+    var track = $('jump-track');
+    track.innerHTML = '';
+    var total = jump.a * jump.b;
+    for (var i = 0; i <= total; i++) {
+      var tick = document.createElement('span');
+      var isBig = i % jump.b === 0;
+      tick.className = 'jump-tick' + (isBig ? ' big' : '');
+      tick.style.left = (i / total * 100) + '%';
+      if (isBig) tick.textContent = i;
+      track.appendChild(tick);
+    }
+    var buddy = buddyOf(S.get().buddy);
+    track.appendChild(makeImg(buddy.img, buddy.emoji, 'jump-buddy'));
+  }
+
+  function jumpHop() {
+    if (jump.busy) return;
+    jump.busy = true;
+    var total = jump.a * jump.b;
+    jump.hops++;
+    jump.pos += jump.b;
+
+    var buddyImg = $('jump-track').querySelector('.jump-buddy');
+    if (buddyImg) buddyImg.style.left = (jump.pos / total * 100) + '%';
+    A.play('hop');
+
+    setTimeout(function () {
+      var chain = [];
+      for (var i = 0; i < jump.hops; i++) chain.push(jump.b);
+      $('jump-sum').innerHTML = '跳了 ' + jump.hops + ' 次，每次 ' + jump.b + ' 格：' +
+        chain.join(' + ') + ' = <b class="ans">' + jump.pos + '</b>';
+      A.say('jh_' + jump.hops + 'x' + jump.b,
+        '加 ' + jump.b + '，现在到 ' + jump.pos + ' 啦！', { force: true });
+      jump.busy = false;
+
+      if (jump.hops >= jump.a) {
+        $('jump-eq').innerHTML = jump.a + ' × ' + jump.b + ' = <b>' + total + '</b>';
+        $('btn-jump-hop').classList.add('hidden');
+        $('btn-jump-again').classList.remove('hidden');
+        window.FX.confetti();
+        A.play('win');
+        A.say('k_' + jump.a + 'x' + jump.b, jump.a + ' 乘 ' + jump.b + ' 等于 ' + total, { force: true });
+      }
+    }, 680);
   }
 
   function renderMulTable() {
@@ -795,7 +1025,7 @@
               void el.offsetWidth;
               el.classList.add('pulse');
               el.classList.add('done');
-              A.speak(a + ' 乘 ' + b + ' 等于 ' + (a * b), { force: true });
+              A.speakKouge(a, b);
               S.update(function (d) {
                 d.stats.tableReads = (d.stats.tableReads || 0) + 1;
                 if (d.stats.tableReads >= 10) d.achievements.book = true;
@@ -819,14 +1049,14 @@
     $('flash-card').classList.remove('flipped');
     $('flash-front').textContent = flashQ.a + ' × ' + flashQ.b + ' = ?';
     $('flash-back').textContent = flashQ.answer;
-    if (S.get().settings.voice) A.speakQuestion(flashQ.a, flashQ.b);
+    A.speakQuestion(flashQ.a, flashQ.b);
   }
   function flipFlashcard() {
     flashFlipped = !flashFlipped;
     $('flash-card').classList.toggle('flipped', flashFlipped);
     A.play('flip');
-    if (flashFlipped && S.get().settings.voice) {
-      A.speak(flashQ.a + ' 乘 ' + flashQ.b + ' 等于 ' + flashQ.answer);
+    if (flashFlipped) {
+      A.say('k_' + flashQ.a + 'x' + flashQ.b, flashQ.a + ' 乘 ' + flashQ.b + ' 等于 ' + flashQ.answer);
     }
   }
 
@@ -864,10 +1094,20 @@
     });
     $('badge-wall').innerHTML = bw;
 
-    /* 错题本 */
+    /* 错题本 + 练习入口 */
+    var bar = $('wrong-practice-bar');
     if (d.wrongBook.length === 0) {
+      bar.innerHTML = '';
       $('wrong-list').innerHTML = '<div class="empty-note">🎈 太厉害了，现在没有错题！</div>';
     } else {
+      bar.innerHTML =
+        '<button class="big-btn orange small wrong-practice-btn" id="btn-wrong-practice">' +
+        '✏️ 练一练错题（' + d.wrongBook.length + ' 道）</button>' +
+        '<p class="wrong-practice-tip">答对一次，错题就会从本子里飞走哦</p>';
+      $('btn-wrong-practice').addEventListener('click', function () {
+        A.play('click');
+        startWrongPractice();
+      });
       var wl = '';
       d.wrongBook.slice(0, 10).forEach(function (w) {
         wl += '<div class="wrong-item">' +
@@ -897,7 +1137,7 @@
         A.play('click');
         S.update(function (dd) { dd.buddy = b.id; });
         renderBuddyGrid();
-        A.speak('你好呀！我是' + b.name + '，' + b.cheer, { force: true });
+        A.say('ui_buddy_' + b.id, '你好呀！我是' + b.name + '，' + b.cheer, { force: true });
       });
       grid.appendChild(item);
     });
@@ -927,10 +1167,14 @@
   /* ================= 初始化绑定 ================= */
 
   function bind() {
-    /* 首次任意交互解锁音频（浏览器自动播放策略） */
+    /* 首次任意交互解锁音频（浏览器自动播放策略），顺带说一次欢迎语 */
     var unlockOnce = function () {
       A.unlock();
       A.syncBGM();
+      if (!unlockOnce._hi) {
+        unlockOnce._hi = true;
+        A.say('ui_welcome', '欢迎来到九九乘法乐园，一起来玩吧！');
+      }
       document.removeEventListener('pointerdown', unlockOnce);
     };
     document.addEventListener('pointerdown', unlockOnce);
@@ -1000,6 +1244,14 @@
     $('btn-flash-flip').addEventListener('click', flipFlashcard);
     $('btn-flash-next').addEventListener('click', function () { A.play('click'); newFlashcard(); });
 
+    /* 乘法的意义：跟我学 */
+    $('btn-mean-tour').addEventListener('click', function () { A.play('click'); meanTour(); });
+
+    /* 跳跳乐 */
+    $('btn-jump-new').addEventListener('click', function () { A.play('click'); jumpNew(); });
+    $('btn-jump-hop').addEventListener('click', jumpHop);
+    $('btn-jump-again').addEventListener('click', function () { A.play('click'); jumpReset(); });
+
     /* 伙伴弹窗 */
     $('btn-buddy-close').addEventListener('click', function () {
       A.play('click');
@@ -1053,6 +1305,7 @@
     renderMeanVisual(false);
     renderMulTable();
     newFlashcard();
+    jumpNew();
     renderHome();
   }
 
