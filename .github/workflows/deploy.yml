@@ -20,7 +20,8 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 首次推送大体积资源（如 audio/ 配音目录）时 rsync 需要更长时间
+    timeout-minutes: 15
 
     steps:
       - name: 📥 检出代码
