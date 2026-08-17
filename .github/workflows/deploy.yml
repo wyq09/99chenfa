@@ -1,7 +1,7 @@
 # 99乘法乐园 · 自动部署
 # 触发: push 到 main 分支
-# 流程: checkout → 注入版本指纹 → rsync 推送 → nginx reload
-# 纯静态无构建, 约 30 秒完成
+# 流程: checkout → 注入版本指纹 → tar 打包 → scp 上传 → 服务器解压原子切换 → nginx reload
+# 打包传输: 音频资源多（500+ 小文件），单流传输远快于 rsync 逐文件协商
 name: Deploy
 
 on:
@@ -66,21 +66,43 @@ jobs:
           chmod 644 ~/.ssh/known_hosts
           echo "SSH_KEY_FILE=$HOME/.ssh/id_ed25519" >> "$GITHUB_ENV"
 
-      - name: 📤 推送静态文件到服务器
-        # --delete 保证服务器无残留旧文件; 排除敏感目录
+      - name: 📦 打包站点
+        # 打成单个 tar.gz 再传输：高延迟链路上 rsync 逐文件协商极慢
+        # （audio/ 有 500+ 个小 mp3），单文件流传输快一个数量级。
+        # mp3 已是有损压缩，gzip 收益主要在 html/css/js 与文件合并本身。
+        run: |
+          tar -czf /tmp/site.tar.gz \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./deploy_keys' \
+            --exclude='./.zcode' \
+            --exclude='./.agents' \
+            --exclude='./.claude' \
+            --exclude='./.DS_Store' \
+            ./
+          ls -lh /tmp/site.tar.gz
+
+      - name: 📤 上传并原子切换
+        # 解压到临时目录后整体 mv 替换（同分区原子操作）：
+        # 1) 部署过程站点不会出现新旧文件混杂
+        # 2) 目录替换天然等价于 rsync --delete 的清理效果
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          rsync -avz --delete \
-            --exclude='deploy_keys' \
-            --exclude='.git' \
-            --exclude='.github' \
-            --exclude='.zcode' \
-            --exclude='.DS_Store' \
-            -e "ssh -i $SSH_KEY_FILE -o BatchMode=yes -o StrictHostKeyChecking=yes" \
-            ./ \
-            "$SSH_USER@$SSH_HOST:/data/99chengfa/"
+          scp -i "$SSH_KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            /tmp/site.tar.gz "$SSH_USER@$SSH_HOST:/tmp/99chengfa-site.tar.gz"
+          ssh -i "$SSH_KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" '
+              set -e
+              rm -rf /data/99chengfa.next
+              mkdir -p /data/99chengfa.next
+              tar -xzf /tmp/99chengfa-site.tar.gz -C /data/99chengfa.next
+              if [ -d /data/99chengfa ]; then mv /data/99chengfa /data/99chengfa.old; fi
+              mv /data/99chengfa.next /data/99chengfa
+              rm -rf /data/99chengfa.old /tmp/99chengfa-site.tar.gz
+              echo "✅ 站点目录已原子切换"
+            '
 
       - name: 🔄 重载 nginx
         env:
@@ -94,9 +116,11 @@ jobs:
       - name: ✅ 验证部署
         run: |
           CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://99.youyongai.com")
-          echo "HTTP 状态码: $CODE"
-          if [ "$CODE" = "200" ]; then
-            echo "✅ 部署成功，站点可访问"
+          MANIFEST=$(curl -s -o /dev/null -w "%{http_code}" "https://99.youyongai.com/audio/manifest.json")
+          CLIP=$(curl -s -o /dev/null -w "%{http_code}" "https://99.youyongai.com/audio/mk_3x4.mp3")
+          echo "首页: $CODE | 音频清单: $MANIFEST | 抽检音频: $CLIP"
+          if [ "$CODE" = "200" ] && [ "$MANIFEST" = "200" ] && [ "$CLIP" = "200" ]; then
+            echo "✅ 部署成功，站点与音频资源均可访问"
           else
             echo "❌ 部署验证失败"
             exit 1
