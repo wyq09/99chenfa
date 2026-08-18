@@ -31,4 +31,9 @@ var mp3 = fs.readFileSync(path.join(root, 'audio/q_3x4.mp3'));
 assert.ok(mp3.slice(0, 3).toString() === 'ID3' || mp3[0] === 0xff, 'q_3x4.mp3 必须是合法 mp3');
 assert.ok(Object.keys(manifest.files).length > 400, '清单条目过少');
 
+/* 5. 启动预生成翻卡片不得读题，否则首次点击会把挂起的题目和欢迎语叠播 */
+assert.match(gameJs, /newFlashcard\(\{\s*silent:\s*true\s*\}\)/);
+assert.match(audioJs, /tok !== voiceToken/);
+assert.match(audioJs, /stopCurrentSrc\(\)/);
+
 console.log('audio-deploy-contract: ok');

@@ -1043,13 +1043,14 @@
 
   /* 翻卡片 */
   var flashQ = null, flashFlipped = false;
-  function newFlashcard() {
+  function newFlashcard(opts) {
     flashQ = D.genFlashcard();
     flashFlipped = false;
     $('flash-card').classList.remove('flipped');
     $('flash-front').textContent = flashQ.a + ' × ' + flashQ.b + ' = ?';
     $('flash-back').textContent = flashQ.answer;
-    A.speakQuestion(flashQ.a, flashQ.b);
+    /* 启动预生成卡片时不读题：否则首次点击 resume AudioContext 会把挂起的读题和欢迎语叠在一起 */
+    if (!(opts && opts.silent)) A.speakQuestion(flashQ.a, flashQ.b);
   }
   function flipFlashcard() {
     flashFlipped = !flashFlipped;
@@ -1167,15 +1168,16 @@
   /* ================= 初始化绑定 ================= */
 
   function bind() {
-    /* 首次任意交互解锁音频（浏览器自动播放策略），顺带说一次欢迎语 */
-    var unlockOnce = function () {
+    /* 首次任意交互解锁音频。点在会自己出声的按钮上不抢播欢迎语 */
+    var unlockOnce = function (e) {
       A.unlock();
       A.syncBGM();
-      if (!unlockOnce._hi) {
-        unlockOnce._hi = true;
-        A.say('ui_welcome', '欢迎来到九九乘法乐园，一起来玩吧！');
-      }
       document.removeEventListener('pointerdown', unlockOnce);
+      if (unlockOnce._hi) return;
+      unlockOnce._hi = true;
+      var t = e && e.target;
+      if (t && t.closest && t.closest('#btn-start, #btn-learn, #btn-buddy')) return;
+      A.say('ui_welcome', '欢迎来到九九乘法乐园，一起来玩吧！');
     };
     document.addEventListener('pointerdown', unlockOnce);
 
@@ -1235,6 +1237,7 @@
           var panes = document.querySelectorAll('.learn-pane');
           for (var p = 0; p < panes.length; p++) panes[p].classList.remove('active');
           $('pane-' + tab.dataset.tab).classList.add('active');
+          if (tab.dataset.tab === 'flash' && flashQ) A.speakQuestion(flashQ.a, flashQ.b);
         });
       })(tabs[t]);
     }
@@ -1304,7 +1307,7 @@
     renderMeanPicker();
     renderMeanVisual(false);
     renderMulTable();
-    newFlashcard();
+    newFlashcard({ silent: true });
     jumpNew();
     renderHome();
   }

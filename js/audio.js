@@ -286,12 +286,15 @@
   }
 
   /* AudioContext 已 resume 后，异步解码仍可出声 */
-  function playViaContext(key, url) {
+  function playViaContext(key, url, tok) {
     if (!ctx) return Promise.resolve(false);
     if (ctx.state === 'suspended') {
       try { ctx.resume(); } catch (e) {}
     }
+    /* 无用户手势时 start() 会挂起，resume 后突然出声，和欢迎语叠在一起 */
+    if (!ctx || ctx.state === 'suspended') return Promise.resolve(false);
     return loadBuffer(key, url).then(function (buf) {
+      if (tok !== voiceToken) return false;
       stopCurrentSrc();
       var src = ctx.createBufferSource();
       var g = ctx.createGain();
@@ -341,8 +344,9 @@
       if (!hasVoiceFile(key)) { resolve(false); return; }
       var url = 'audio/' + manifest.files[key];
       var tok = voiceToken;
-      playViaContext(key, url).then(function (ok) {
-        if (ok) { resolve(tok === voiceToken); return; }
+      playViaContext(key, url, tok).then(function (ok) {
+        if (tok !== voiceToken) { resolve(false); return; }
+        if (ok) { resolve(true); return; }
         playViaElement(url).then(function (ok2) { resolve(!!ok2 && tok === voiceToken); });
       });
     });
@@ -403,6 +407,9 @@
 
   function saySeq(parts, opts) {
     if (!settings().voice && !(opts && opts.force)) return Promise.resolve(false);
+    /* 新一句立刻停掉旧的，避免欢迎语和解码中的读题叠播 */
+    stopCurrentSrc();
+    try { global.speechSynthesis.cancel(); } catch (e) {}
     var tok = ++voiceToken;
     var gap = opts && opts.gap != null ? opts.gap : 130;
     unlock();
