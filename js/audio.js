@@ -156,13 +156,20 @@
 
   /* ============================================================
      语音引擎：优先播放预生成的小花妖 mp3，缺失时降级 Web Speech
+     - 主路径：fetch + decodeAudioData + BufferSource
+       AudioContext 在首次手势中 resume 后，异步解码仍能出声
+       （HTMLAudio.play() 在手势过期后会被自动播放策略拦截）
+     - 兜底：同一个 <audio> 元素换 src（iOS 解锁不能跨元素传递）
      manifest.json: { files: { "q_3x4": "q_3x4.mp3", ... } }
      ============================================================ */
 
   var manifest = null;
   var manifestReq = null;
-  var audioEls = {};
   var voiceToken = 0;      /* 序列令牌：新语音开始时作废旧的序列 */
+  var voiceEl = null;
+  var currentSrc = null;
+  var bufCache = {};
+  var bufOrder = [];
   var SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
 
   function loadManifest() {
@@ -178,9 +185,10 @@
             var m = JSON.parse(xhr.responseText);
             manifest = (m && m.files) ? m : null;
           } catch (e) { manifest = null; }
+          if (!manifest) manifestReq = null;
           resolve(manifest);
         };
-        xhr.onerror = function () { manifest = null; resolve(null); };
+        xhr.onerror = function () { manifest = null; manifestReq = null; resolve(null); };
         xhr.send();
       } catch (e) { manifest = null; resolve(null); }
     });
@@ -191,54 +199,152 @@
     return !!(manifest && manifest.files[key]);
   }
 
-  function getEl(key) {
-    if (!audioEls[key]) {
-      var el = new global.Audio('audio/' + manifest.files[key]);
-      el.preload = 'auto';
-      audioEls[key] = el;
-    }
-    return audioEls[key];
+  function ensureVoiceEl() {
+    if (voiceEl) return voiceEl;
+    voiceEl = new global.Audio();
+    voiceEl.preload = 'auto';
+    voiceEl.playsInline = true;
+    try { voiceEl.setAttribute('playsinline', ''); } catch (e) {}
+    try { voiceEl.setAttribute('webkit-playsinline', ''); } catch (e) {}
+    voiceEl.style.display = 'none';
+    try { (document.body || document.documentElement).appendChild(voiceEl); } catch (e) {}
+    return voiceEl;
   }
 
-  /* iOS/部分浏览器：首次手势时用一段静音 wav 解锁 HTMLAudio */
+  /* iOS/微信：首次手势时用静音 wav 解锁「同一个」HTMLAudio */
   function unlockMedia() {
     if (unlockMedia._done) return;
     unlockMedia._done = true;
     try {
-      var el = new global.Audio(SILENT_WAV);
+      var el = ensureVoiceEl();
+      el.src = SILENT_WAV;
       var p = el.play();
       if (p && p.catch) p.catch(function () {});
     } catch (e) {}
   }
 
+  function stopCurrentSrc() {
+    if (currentSrc) {
+      try { currentSrc.onended = null; currentSrc.stop(); } catch (e) {}
+      currentSrc = null;
+    }
+    if (voiceEl) {
+      try { voiceEl.pause(); } catch (e) {}
+    }
+  }
+
   function stopVoiceAudio() {
     voiceToken++;
-    for (var k in audioEls) {
-      try { audioEls[k].pause(); } catch (e) {}
-    }
+    stopCurrentSrc();
     try { global.speechSynthesis.cancel(); } catch (e) {}
+  }
+
+  function fetchArrayBuffer(url) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.responseType = 'arraybuffer';
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300 && xhr.response) resolve(xhr.response);
+        else reject(new Error('http ' + xhr.status));
+      };
+      xhr.onerror = function () { reject(new Error('network')); };
+      xhr.send();
+    });
+  }
+
+  function decodeAb(ab) {
+    return new Promise(function (resolve, reject) {
+      if (!ctx) { reject(new Error('no ctx')); return; }
+      var settled = false;
+      function ok(buf) { if (!settled) { settled = true; resolve(buf); } }
+      function fail(err) { if (!settled) { settled = true; reject(err || new Error('decode')); } }
+      try {
+        var p = ctx.decodeAudioData(ab, ok, fail);
+        if (p && typeof p.then === 'function') p.then(ok, fail);
+      } catch (e) { fail(e); }
+    });
+  }
+
+  function rememberBuf(key, buf) {
+    bufCache[key] = buf;
+    var i = bufOrder.indexOf(key);
+    if (i >= 0) bufOrder.splice(i, 1);
+    bufOrder.push(key);
+    while (bufOrder.length > 24) {
+      var old = bufOrder.shift();
+      if (old !== key) delete bufCache[old];
+    }
+  }
+
+  function loadBuffer(key, url) {
+    if (bufCache[key]) return Promise.resolve(bufCache[key]);
+    return fetchArrayBuffer(url).then(decodeAb).then(function (buf) {
+      rememberBuf(key, buf);
+      return buf;
+    });
+  }
+
+  /* AudioContext 已 resume 后，异步解码仍可出声 */
+  function playViaContext(key, url) {
+    if (!ctx) return Promise.resolve(false);
+    if (ctx.state === 'suspended') {
+      try { ctx.resume(); } catch (e) {}
+    }
+    return loadBuffer(key, url).then(function (buf) {
+      stopCurrentSrc();
+      var src = ctx.createBufferSource();
+      var g = ctx.createGain();
+      g.gain.value = 1;
+      src.buffer = buf;
+      src.connect(g);
+      g.connect(ctx.destination);
+      currentSrc = src;
+      return new Promise(function (resolve) {
+        var settled = false;
+        function done(ok) {
+          if (settled) return;
+          settled = true;
+          if (currentSrc === src) currentSrc = null;
+          resolve(ok);
+        }
+        src.onended = function () { done(true); };
+        try { src.start(0); } catch (e) { done(false); return; }
+        setTimeout(function () { done(true); }, Math.min(15000, buf.duration * 1000 + 400));
+      });
+    }).catch(function () { return false; });
+  }
+
+  /* 复用解锁过的同一个 audio 元素换 src */
+  function playViaElement(url) {
+    return new Promise(function (resolve) {
+      var el = ensureVoiceEl();
+      var settled = false;
+      function done(ok) {
+        if (settled) return;
+        settled = true;
+        el.onended = el.onerror = null;
+        resolve(ok);
+      }
+      el.onended = function () { done(true); };
+      el.onerror = function () { done(false); };
+      try { el.src = url; el.load(); } catch (e) {}
+      var p = el.play();
+      if (p && p.catch) p.catch(function () { done(false); });
+      setTimeout(function () { done(true); }, 15000);
+    });
   }
 
   /* 播放单个文件片段，resolve(true)=播完 / resolve(false)=不可用 */
   function playFile(key) {
     return new Promise(function (resolve) {
       if (!hasVoiceFile(key)) { resolve(false); return; }
-      var el = getEl(key);
+      var url = 'audio/' + manifest.files[key];
       var tok = voiceToken;
-      var settled = false;
-      function done(ok) {
-        if (settled) return;
-        settled = true;
-        el.onended = el.onerror = null;
-        resolve(ok && tok === voiceToken);
-      }
-      el.onended = function () { done(true); };
-      el.onerror = function () { done(false); };
-      try { el.currentTime = 0; } catch (e) {}
-      var p = el.play();
-      if (p && p.catch) p.catch(function () { done(false); });
-      /* 保险丝：异常长的文件按 15s 截断判定 */
-      setTimeout(function () { done(true); }, 15000);
+      playViaContext(key, url).then(function (ok) {
+        if (ok) { resolve(tok === voiceToken); return; }
+        playViaElement(url).then(function (ok2) { resolve(!!ok2 && tok === voiceToken); });
+      });
     });
   }
 
@@ -355,4 +461,8 @@
     stopBGM: stopBGM,
     syncBGM: syncBGM
   };
+
+  /* 进页即拉清单，避免第一次点击还要等 XHR 才 play */
+  loadManifest();
+  document.addEventListener('WeixinJSBridgeReady', function () { unlock(); }, false);
 })(window);
