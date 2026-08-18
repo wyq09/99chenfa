@@ -36,4 +36,8 @@ assert.match(gameJs, /newFlashcard\(\{\s*silent:\s*true\s*\}\)/);
 assert.match(audioJs, /tok !== voiceToken/);
 assert.match(audioJs, /stopCurrentSrc\(\)/);
 
+/* 6. 错题全部练完时没有「再练一次」，绑事件必须判空，否则抛错导致「返回报告」点了没反应 */
+assert.doesNotMatch(gameJs, /\$\('r-replay'\)\.addEventListener/, 'r-replay 可能不存在，不能直接绑事件');
+assert.match(gameJs, /if \(replayBtn\)/);
+
 console.log('audio-deploy-contract: ok');

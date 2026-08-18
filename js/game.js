@@ -731,13 +731,15 @@
       closeResult();
       startGame(G.level + 1);
     });
-    $('r-replay').addEventListener('click', function () {
+    var replayBtn = $('r-replay');
+    if (replayBtn) replayBtn.addEventListener('click', function () {
       A.play('click');
       closeResult();
       if (G.mode === 'practice') startWrongPractice();
       else startGame(G.level);
     });
-    $('r-back').addEventListener('click', function () {
+    var backBtn = $('r-back');
+    if (backBtn) backBtn.addEventListener('click', function () {
       A.play('click');
       closeResult();
       show(G.mode === 'practice' ? 'report' : 'levels');
