@@ -93,28 +93,30 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
         run: |
+          set -o pipefail
           SSH_OPTS="-i $SSH_KEY_FILE -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8"
+          # 部署用户对 /data 无写权限，只能写已有的 /data/99chengfa 与 /tmp
           echo "上传站点包（不含 audio）..."
           scp $SSH_OPTS /tmp/site.tar.gz "$SSH_USER@$SSH_HOST:/tmp/99chengfa-site.tar.gz"
           REMOTE_COUNT=$(ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" '
             set -e
-            rm -rf /data/99chengfa.next
-            mkdir -p /data/99chengfa.next
-            tar -xzf /tmp/99chengfa-site.tar.gz -C /data/99chengfa.next
+            rm -rf /tmp/99chengfa.next
+            mkdir -p /tmp/99chengfa.next
+            tar -xzf /tmp/99chengfa-site.tar.gz -C /tmp/99chengfa.next
             if [ -d /data/99chengfa/audio ]; then
-              rm -rf /data/99chengfa.next/audio
-              cp -a /data/99chengfa/audio /data/99chengfa.next/audio
+              rm -rf /tmp/99chengfa.next/audio
+              cp -a /data/99chengfa/audio /tmp/99chengfa.next/audio
             fi
-            find /data/99chengfa.next/audio -name "*.mp3" 2>/dev/null | wc -l | tr -d " "
-          ' | tail -1 | tr -d '[:space:]')
+            find /tmp/99chengfa.next/audio -name "*.mp3" 2>/dev/null | wc -l | tr -d " "
+          ' | tail -1 | tr -d "[:space:]")
           echo "服务器已有 mp3: ${REMOTE_COUNT:-0} / 本地 ${LOCAL_AUDIO}"
           if [ "${REMOTE_COUNT:-0}" -lt "$LOCAL_AUDIO" ]; then
             echo "音频不完整，上传 audio.tar.gz ..."
             scp $SSH_OPTS /tmp/audio.tar.gz "$SSH_USER@$SSH_HOST:/tmp/99chengfa-audio.tar.gz"
             ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" '
               set -e
-              rm -rf /data/99chengfa.next/audio
-              tar -xzf /tmp/99chengfa-audio.tar.gz -C /data/99chengfa.next
+              rm -rf /tmp/99chengfa.next/audio
+              tar -xzf /tmp/99chengfa-audio.tar.gz -C /tmp/99chengfa.next
               rm -f /tmp/99chengfa-audio.tar.gz
             '
           else
@@ -122,10 +124,10 @@ jobs:
           fi
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" '
             set -e
-            if [ -d /data/99chengfa ]; then mv /data/99chengfa /data/99chengfa.old; fi
-            mv /data/99chengfa.next /data/99chengfa
-            rm -rf /data/99chengfa.old /tmp/99chengfa-site.tar.gz
-            echo "✅ 站点目录已原子切换"
+            mkdir -p /data/99chengfa
+            rsync -a --delete /tmp/99chengfa.next/ /data/99chengfa/
+            rm -rf /tmp/99chengfa.next /tmp/99chengfa-site.tar.gz
+            echo "✅ 站点已同步到 /data/99chengfa"
           '
 
       - name: 🔄 重载 nginx
